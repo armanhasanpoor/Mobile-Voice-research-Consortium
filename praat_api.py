@@ -1,100 +1,62 @@
-import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+import subprocess
+import os
 
-void main() => runApp(const MyApp());
+app = Flask(__name__)
+CORS(app)
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
-  @override
-  Widget build(BuildContext context) {
-    return const MaterialApp(home: AnalysisScreen());
-  }
-}
+PRAAT_SCRIPT_PATH = '/home/ahassanp/praat_server/praat_scripts/optimized_cpps.praat'
 
-class AnalysisScreen extends StatefulWidget {
-  const AnalysisScreen({super.key});
-  @override
-  State<AnalysisScreen> createState() => _AnalysisScreenState();
-}
 
-class _AnalysisScreenState extends State<AnalysisScreen> {
-  String selectedFile = 'track24.wav'; // default file
-  Map<String, dynamic>? analysisResult;
-  bool isLoading = false;
-  String error = '';
 
-  Future<void> analyzeFile() async {
-    setState(() {
-      isLoading = true;
-      error = '';
-      analysisResult = null;
-    });
+WAV_FOLDER = '/home/ahassanp/praat_server/static'
 
-    final uri = Uri.parse('http://127.0.0.1:5000/analyze?file=$selectedFile');
-    //  final uri = Uri.parse(' http://172.28.169.211:5000/analyze?file=$selectedFile');
+@app.route('/analyze', methods=['GET'])
+def analyze():
+    filename = request.args.get('file')
+    if not filename or not filename.endswith('.wav'):
+        return jsonify({'error': 'Missing or invalid .wav filename'}), 400
 
-    try {
-      final response = await http.get(uri);
-      if (response.statusCode == 200) {
-        setState(() {
-          analysisResult = json.decode(response.body);
-        });
-      } else {
-        setState(() {
-          error = json.decode(response.body)['error'] ?? 'Unknown error';
-        });
-      }
-    } catch (e) {
-      setState(() {
-        error = 'Failed to connect: $e';
-      });
-    } finally {
-      setState(() => isLoading = false);
-    }
-  }
+    wav_path = os.path.join(WAV_FOLDER, filename)
+    if not os.path.exists(wav_path):
+        return jsonify({'error': f'File not found: {filename}'}), 404
+    
+    try:
+        result = subprocess.run([
+         'praat', '--run', PRAAT_SCRIPT_PATH,
+         'wav', WAV_FOLDER, '60', '5000', '50', '60', '330', '1', '0.02', '0.0005', 'Straight'
+        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Praat Analysis')),
-      body: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          children: [
-            DropdownButton<String>(
-              value: selectedFile,
-              items: const [
-                DropdownMenuItem(
-                  value: 'track24.wav',
-                  child: Text('track24.wav'),
-                ),
-                // Add more filenames if needed
-              ],
-              onChanged: (value) => setState(() => selectedFile = value!),
-            ),
-            const SizedBox(height: 10),
-            ElevatedButton(
-              onPressed: analyzeFile,
-              child: const Text('Analyze'),
-            ),
-            const SizedBox(height: 20),
-            if (isLoading) const CircularProgressIndicator(),
-            if (error.isNotEmpty)
-              Text('Error: $error', style: const TextStyle(color: Colors.red)),
-            if (analysisResult != null) ...[
-              for (var key in analysisResult!.keys)
-                TextField(
-                  readOnly: true,
-                  decoration: InputDecoration(
-                    labelText: key,
-                    hintText: '${analysisResult![key]}',
-                  ),
-                ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-}
+# Only treat it as failure if stderr contains real errors (not "Done!")
+        if "Error:" in result.stderr and "Done!" not in result.stderr:
+             return jsonify({'error': f'Praat script failed: {result.stderr}'}), 500
+
+
+        print("PRAAT STDOUT:", result.stdout)
+        print("PRAAT STDERR:", result.stderr)
+
+        txt_path = wav_path.replace('.wav', '.txt')
+
+        if not os.path.exists(txt_path):
+            return jsonify({'error': f'Praat output not found at {txt_path}'}), 500
+
+        with open(txt_path, 'r') as f:
+            lines = f.readlines()
+            header = lines[0].strip().split(',')
+            values = lines[1].strip().split(',')
+            return jsonify(dict(sorted(zip(header, values))))
+
+
+    except subprocess.CalledProcessError as e:
+        return jsonify({'error': f'Praat script failed: {e.stderr}'}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
+
+
+# http://127.0.0.1:5000/analyze?file=track24.wav
+
