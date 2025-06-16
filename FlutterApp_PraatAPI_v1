@@ -1,3 +1,9 @@
+// This Flutter app sends a selected .wav file name to a local Flask server for acoustic analysis.
+// It receives and displays CPPS, jitter, shimmer, HNR, and F0 results from the server.
+// Arman Hassanpour
+// The University of Western Ontario, June 2025
+// ahassanp@uwo.ca
+
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
