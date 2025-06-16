@@ -1,3 +1,9 @@
+# This Flask server receives a .wav filename via HTTP GET, runs a Praat script for acoustic analysis,
+# and returns CPPS, jitter, shimmer, HNR, and F0 values extracted from the resulting .txt file.
+# Arman Hassanpour
+# The University of Western Ontario, June 2025
+# ahassanp@uwo.ca
+
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import subprocess
